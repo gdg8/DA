@@ -1,0 +1,206 @@
+#!/usr/bin/perl
+
+use strict;
+
+my $gdghome;
+
+if (-d '/Users/grahamgough/')
+  {
+    $gdghome= '/Users/grahamgough';
+  }
+elsif (-d '/home/graham')
+  {
+    $gdghome= '/home/graham';
+  }
+
+my $datahome="$gdghome/Teach/Duties/DutiesAlloc/Teach+Admin";
+$datahome=".";
+
+my $session="09-10";
+$session="12-13";
+
+my $datadir="$datahome/$session/teaching-data";
+
+die "No data: $datadir\n" unless (-d $datadir);
+
+my %cu;
+my %issue;
+my %staff;
+
+my %ih_staff_alias =
+  (
+   VP => 'pavlidisv',
+   Mandi => 'AJB',
+   DFellows => 'DKF',
+   GLeaver => 'GL',
+   GRiley => 'GDR',
+   MTaylor => 'MJT',
+   PMissier => 'PM',
+   HVincent => 'HMV',
+   NJohn => 'NWJ',
+   THewitt => 'WTH',
+   JBrooke => 'Brooke',
+   SPickles => 'SMP',
+   DDresner => 'DD',
+   NThacker => 'NAT',
+   HSimmons => 'HS',
+   TCootes => 'TFC',
+   KK => 'KXK',
+   CT => 'CJTw',
+   ANO => 'NA',
+  );
+
+get_new_cu_codes();
+get_gdg_staff_alloc();
+get_ih_staff_alloc();
+#print_cu_alloc();
+cmp_allocs();
+
+
+exit;
+
+#############################################################################
+#############################################################################
+#############################################################################
+
+sub get_gdg_staff_alloc {
+  my $custaff="$datadir/cu-staff.csv";
+  open CUSTAFF, $custaff or die "$!: $custaff\n";
+  while (<CUSTAFF>) {
+    chomp;
+    next unless (/\S/);
+    next if (/^#/);
+    s/ *$//;
+    my @cols =split / *, */;
+    my $cu = $cols[0];
+    $cu=$cu{'newcode'}{$cu} if ($cu{'newcode'}{$cu});
+    my $staff = $cols[1];
+    next if ($staff =~ /MBS/);
+    next if ($staff =~ /MTStaff/);
+    next if ($staff =~ /MTSTAFF/);
+    next if ($staff =~ /EEStaff/);
+    next if ($staff =~ /Careers/);
+    next if ($staff =~ /ANO/);
+    $staff = $ih_staff_alias{$staff} if ($ih_staff_alias{$staff});
+    $cu{'gdgstaff'}{$cu} = [] unless ($cu{'gdgstaff'}{$cu});
+    push @{$cu{'gdgstaff'}{$cu}}, $staff;
+  }
+  close CUSTAFF;
+}
+
+sub get_ih_staff_alloc {
+  my $ihdbdata=
+    'wget -q -O - http://www.cs.manchester.ac.uk/acso/staffloads/teachingplanningcsv.php';
+  open IHDBDATA, "$ihdbdata|" or die "$!: $ihdbdata\n";
+  while (<IHDBDATA>) {
+    chomp;
+    next if (/^Duty/);
+    next unless (/\S/);
+    s/ *$//;
+    s/^ *//;
+    my @cols =split / *, */;
+    my $cu = $cols[0];
+#    next if ($cu =~ /Tutorial/);
+    my $staff = $cols[1];
+    push @{$cu{'ihstaff'}{$cu}}, $staff;
+  }
+  close IHDBDATA;
+}
+
+sub print_cu_alloc {
+  foreach my $cu (sort keys %{$cu{'gdgstaff'}}) {
+    my $gdg = join ",", sort @{$cu{'gdgstaff'}{$cu}};
+    print  "$cu\t$gdg\n";
+  }
+}
+
+sub cmp_allocs {
+  foreach my $cu (sort keys %{$cu{'gdgstaff'}}) {
+    my $gdg = join ",", sort @{$cu{'gdgstaff'}{$cu}};
+    my $ih;
+    $ih = join ",", sort @{$cu{'ihstaff'}{$cu}}
+      if ($cu{'ihstaff'}{$cu});
+    if ($gdg ne $ih) {
+      my @d = @{gen_diffs($gdg,$ih)};
+      print  "$cu: Here: $gdg\tSchool: $ih ($d[0]: $d[1])\n" 
+    }
+    $cu{'ihstaff'}{$cu} = $cu{'gdgstaff'}{$cu};
+      
+  }
+  foreach my $cu (sort keys %{$cu{'ihstaff'}}) {
+    my $ih = join ",", sort @{$cu{'ihstaff'}{$cu}};
+    my $gdg;
+    $gdg = join ",", sort @{$cu{'gdgstaff'}{$cu}}
+      if ($cu{'gdgstaff'}{$cu});
+    if ($gdg ne $ih) {
+      my @d = @{gen_diffs($gdg,$ih)};
+      print  "$cu: Here: $gdg\tSchool: $ih ($d[0]: $d[1])\n" 
+    }
+  }
+}
+
+sub get_new_cu_codes
+  {
+    my $cuconv="$datadir/cu-alias.csv";
+    return unless (-f $cuconv );
+    open CUCONV, $cuconv or die "$!: $cuconv\n";
+    
+    while (<CUCONV>) {
+      chomp;
+      next unless (/\S/);
+      next if (/^#/);
+      s/ *$//;
+      my @cols =split / *, */;
+      my $cuold = $cols[0];
+      my $cunew = $cols[1];
+      if (grep(/$cunew/, values %{$cu{'newcode'}}))
+	{
+	  die "Duplicate code allocation $cunew \n";
+	}
+      else
+	{
+	  $cu{'oldcode'}{$cunew} = $cuold;
+	  $cu{'newcode'}{$cuold} = $cunew;
+	}
+    }
+    close CUCONV;
+  }
+
+sub gen_diffs {
+  my $a = shift;
+  my $b = shift;
+
+  my @a =  split(',',$a);
+  my @b =  split(',',$b);
+  
+  my %ina;
+  my %inb;
+  
+  foreach my $a (@a) {
+    $ina{$a} = 1;
+  }
+  foreach my $b (@b) {
+    $inb{$b} = 1;
+  }
+  my $aonly;
+  my $sep = "";
+  foreach my $a (@a) {
+    unless ($inb{$a}) 
+      {
+	$aonly .= $sep . $a;
+	$sep = ",";
+      }
+  }    
+  my $bonly;
+  $sep = "";
+  foreach my $b (@b) {
+    unless ($ina{$b}) 
+      {
+	$bonly .= $sep . $b;
+	$sep = ",";
+      }
+  }    
+  return [$aonly,$bonly];
+}
+  
+

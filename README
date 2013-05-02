@@ -1,0 +1,33 @@
+DA tools
+********
+
+Usage fairly self explanatory (at least once you've used it).
+
+Non-intuitive bits include
+
+Compare with School duties DB
+*****************************
+
+make comp
+
+This compares this data with that in the DA dbase and shows the diffs
+Output in form
+<unit code>: Here: <d1: local staffing data> School: <d2: DA DB data> (In d1, not d2: In d2, not d1)
+
+eg.
+COMP61242: Here: BMGC,NPF	School: SBF (BMGC,NPF: SBF)
+
+Changing Course unit codes.
+***************************
+cu-alias.csv
+This is used when a course unit changes code, the format is
+
+old code,new code
+
+Using this has the side effect of creating new versions of
+cu-staff.csv, cu-title.csv and cu-issues.csv. All located in the
+reports directory/CSV. Once things have settled down, these files can
+be slotted into place to replace the out of date ones in the data
+directory and cu-alias.csv can then be removed. The shell script
+switch-to-new-codes does this job for you, and creates backup versions
+of the old files.

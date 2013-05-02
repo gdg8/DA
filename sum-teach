@@ -1,0 +1,871 @@
+#!/usr/bin/perl
+
+use strict;
+use Getopt::Std;
+use Text::ParseWords;
+
+my %opts;
+getopts('u', \%opts) or die;
+my ( $d, $m, $y ) = ( localtime() )[ 3,4,5 ]; 
+my @abbr = qw( Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec );
+$y += 1900;
+my $today = "$abbr[$m] $d, $y";
+$today = localtime();
+
+my $session=$ARGV[0];
+
+my $datadir="$session/teaching-data";
+my $repsdir="$session/reps";
+
+my %cu;
+my %issue;
+my %staff;
+
+my $staffcutex="$repsdir/staff-by-tot.tex";
+my $custtex="$repsdir/cu-staff.tex";
+my $custtxt="$repsdir/cu-staff.txt";
+my $cuisstxt="$repsdir/cu-issues.txt";
+my $stafflist="$repsdir/all-staff.tex";
+my $staffcutexalph="$repsdir/staff-by-name.tex";
+my $staffcutexalphcsv="$repsdir/CSV/staff-by-name.csv";
+my $allstafftuts="$repsdir/all-staff-tuts.csv";
+my $stafftutstxt="$repsdir/staff-tuts.txt";
+my $codemap="$repsdir/code-map.tex";
+my $codemaphtml="$repsdir/code-map.html";
+
+get_staff_names($datadir);
+get_new_cu_codes($datadir);
+get_issues($datadir);
+get_cu_titles($datadir);
+get_staff_alloc($datadir);
+get_stu_nums();
+
+print_cu_alloc();
+print_staff_by_load();
+print_staff_by_name();
+print_staff_list();
+print_code_map();
+
+
+chdir $repsdir;
+
+foreach my $texfile ($stafflist, $staffcutex, $staffcutexalph, 
+		     $custtex, $codemap)
+  {
+
+    $texfile =~ s{$repsdir/}{};
+    my @args = ('pdflatex', $texfile);
+
+    system(@args) == 0
+      or die "system @args failed: $?";
+    
+    system(@args) == 0
+      or die "system @args failed: $?";
+    
+    $texfile =~ s{\.tex$}{};
+    $texfile =~ s{.*/}{};
+    unlink "$texfile.aux", "$texfile.log";
+  }
+
+exit;
+
+#############################################################################
+#############################################################################
+#############################################################################
+
+sub by_tot {
+  return -1 if ($a =~ /ANO/);
+  return 1 if ($b =~ /ANO/);
+  $staff{'load'}{$b} <=> $staff{'load'}{$a};
+}
+
+sub by_surname {
+  return 1 unless ($staff{'surname'}{$a});
+  return -1 unless ($staff{'surname'}{$b});
+  $staff{'surname'}{$a} cmp $staff{'surname'}{$b};
+}
+
+sub by_value {
+  $cu{'newcode'}{$a} cmp $cu{'newcode'}{$b};
+}
+
+sub by_old_code {
+  my ($codea) = $cu{'oldcode'}{$a};
+  my ($codeb) = $cu{'oldcode'}{$b};
+
+  $codea cmp $codeb;
+}
+
+sub by_year {
+  my ($scha,$codea) = ($a =~ /(....)(.....)/);
+  my ($schb,$codeb) = ($b =~ /(....)(.....)/);
+  
+  my ($leva,$origa,$resta) = ($codea =~ /(.)(.)(...)/);
+  my ($levb,$origb,$restb) = ($codeb =~ /(.)(.)(...)/);
+
+  
+  if ($leva cmp $levb)		# year
+    { 
+      $leva cmp $levb;		# year
+    }					
+  elsif ($scha cmp $schb)	# School
+    {
+      return -1 if ($scha =~ /COMP/);
+      return 1 if ($schb =~ /COMP/);
+      $scha cmp $schb; 
+    }				# School
+  else
+    {
+      $codea cmp $codeb;
+    }
+}
+
+sub by_year_and_sem {
+  my ($scha,$codea) = ($a =~ /(....)(.....)/);
+  my ($schb,$codeb) = ($b =~ /(....)(.....)/);
+  
+  my ($leva,$resta,$sema) = ($codea =~ /(.)(...)(.)/);
+  my ($levb,$restb,$semb) = ($codeb =~ /(.)(...)(.)/);
+
+  
+  if ($leva cmp $levb)		# year
+    { 
+      $leva cmp $levb;		# year
+    }					
+  elsif ($scha cmp $schb)	# School
+    {
+      return -1 if ($scha =~ /COMP/);
+      return 1 if ($schb =~ /COMP/);
+      $scha cmp $schb; 
+    }				# School
+  elsif ($sema cmp $semb)	# semester
+    {
+      $sema cmp $semb;
+    }
+  else
+    {
+      $resta cmp $restb;
+    }
+}
+  
+sub get_issues {
+  my $datadir=shift;
+  my $issuescsv="$datadir/cu-issues.csv";
+  open ISSUES, $issuescsv or die "$!: $issuescsv\n";
+  my @newissues;
+  my @oldissues;
+
+  while (<ISSUES>) {
+    chomp;
+    my $needsfixing=0;
+    next unless (/\S/);
+    next if (/^#/);
+    s/ *$//;
+    my @cols =parse_csv($_);
+    my $cu = $cols[0];
+#    print "XXX$cu\n";
+    $cu{'needsfixing'}{$cu} = 0;
+    if ($cu =~ m{\*$}) {
+      $cu =~ s{\*}{};
+      $cu{'needsfixing'}{$cu} = 1;
+    }
+    if ($cu =~ m{\+$}) {
+      $cu =~ s{\+}{};
+      $cu{'needsfixing'}{$cu} = 2;
+    }
+    $cu=$cu{'newcode'}{$cu} if ($cu{'newcode'}{$cu});
+    my $oldcu = $cols[0];
+    $oldcu=$cu{'oldcode'}{$cu} if ($cu{'oldcode'}{$cu});
+    my $issue = join(', ',@cols[1..$#cols]);
+    $cu{'issuetext'}{$cu}=$issue;
+    $cu{'issue'}{$cu} = "*";
+    push @newissues, "$cu,$issue\n";
+    push @oldissues, "$oldcu,$issue\n";
+  } 
+    my $newcuissues="$repsdir/CSV/cu-issues.csv";
+    open NEWCUISSUES, ">$newcuissues" or die "$!: $newcuissues\n";
+    print NEWCUISSUES (sort by_year @newissues);
+    close NEWCUISSUES;
+    my $oldcuissues="$repsdir/CSV/old-cu-issues.csv";
+    open OLDCUISSUES, ">$oldcuissues" or die "$!: $oldcuissues\n";
+    print OLDCUISSUES (sort by_year @oldissues);
+    close OLDCUISSUES;
+
+}
+
+sub get_staff_names 
+  {
+    my $datadir=shift;
+    my $staff="$datadir/staff.csv";
+    open STAFF, $staff or die "$!: $staff\n";
+    while (<STAFF>) {
+      chomp;
+      next unless (/\S/);
+      next if (/^#/);
+      s/ *$//;
+      my @cols =parse_csv($_);
+      my $surn = $cols[0];
+      my $forn = $cols[1];
+      my $inits = $cols[2];
+      my $status = $cols[3];
+      $staff{'comment'}{$inits} = $cols[4];
+      $staff{'name'}{$inits} = "$forn $surn";
+      $staff{'surname'}{$inits} = $surn;
+      $staff{'forname'}{$inits} = $forn;
+      $staff{'status'}{$inits} = $status;
+      $staff{'load-text'}{$inits} = "";
+      $staff{'load'}{$inits} = 0;
+    }
+
+  }
+
+sub get_new_cu_codes
+  {
+    my $datadir=shift;
+    my $cuconv="$datadir/cu-alias.csv";
+    return unless (-f $cuconv );
+    open CUCONV, $cuconv or die "$!: $cuconv\n";
+    
+    while (<CUCONV>) {
+      #chomp;
+      next unless (/\S/);
+      next if (/^#/);
+      s/ *$//;
+      my @cols =parse_csv($_);
+      my $cuold = $cols[0];
+      my $cunew = $cols[1];
+      if (grep(/$cunew/, values %{$cu{'newcode'}}))
+	{
+	  die "Duplicate code allocation $cunew \n";
+	}
+      else
+	{
+	  $cu{'oldcode'}{$cunew} = $cuold;
+	  $cu{'newcode'}{$cuold} = $cunew;
+	}
+    }
+    close CUCONV;
+  }
+
+sub get_new_cu_names
+  {
+    my $datadir=shift;
+    my $cuconv="$datadir/conv-info-codes.csv";
+    return unless (-f $cuconv );
+    open CUCONV, $cuconv or die "$!: $cuconv\n";
+    
+    while (<CUCONV>) {
+      #chomp;
+      next unless (/\S/);
+      next if (/^#/);
+      s/ *$//;
+      my @cols =parse_csv($_);
+      my $cuold = $cols[0];
+      my $cunew = $cols[1];
+      if (grep(/$cunew/, values %{$cu{'newcode'}}))
+	{
+	  die "Duplicate code allocation $cunew \n";
+	}
+      else
+	{
+	  $cu{'oldcode'}{$cunew} = $cuold;
+	  $cu{'newcode'}{$cuold} = $cunew;
+	}
+    }
+    close CUCONV;
+  }
+
+sub get_staff_alloc 
+  {
+    my $datadir=shift;
+    my $custaff="$datadir/cu-staff.csv";
+    open CUSTAFF, $custaff or die "$!: $custaff\n";
+    my @newallocs;
+    my @oldallocs;
+
+    while (<CUSTAFF>) {
+      chomp;
+      next unless (/\S/);
+      next if (/^#/);
+      s/ *$//;
+      my @cols = parse_csv($_);
+      my $cu = $cols[0];
+      my $oldcu=$cu;
+      $cu=$cu{'newcode'}{$cu} if ($cu{'newcode'}{$cu});
+      next unless ((not $opts{'u'}) or ($cu =~ /^....[1-3]/));
+      $oldcu=$cu{'oldcode'}{$cu} if ($cu{'oldcode'}{$cu});
+      my $staff = $cols[1];
+      my $creds = $cols[2];
+#      next if ($creds eq 'X');	# examples classes
+      if ($cols[3])
+	{
+	  $cu{'leader'}{$cu} = $staff if ($cols[3] =~ m{!});
+	}
+      push @newallocs, "$cu,$staff,$creds\n";
+      push @oldallocs, "$oldcu,$staff,$creds\n";
+      my $staff_entry = $staff;
+      if ($cu{'leader'}{$cu} eq $staff) {
+	$staff_entry = "\\textbf{$staff}";
+      }
+      if ($cu{'staff'}{$cu} eq 'ANO')
+	{
+	  $cu{'staff'}{$cu} = "$staff_entry ($creds), ";
+	}
+      else
+	{
+	  $cu{'staff'}{$cu} .= "$staff_entry ($creds), ";
+	}
+      $cu{'credsalloc'}{$cu} += $creds  unless ($creds eq 'X');
+
+      $cu =~ s/(.)(...)/$1/;
+      $staff{'load-text'}{$staff} .= "$cu ($creds), ";
+      push(@{$staff{'tuts-text'}{$staff}}, $cu) if ($cu =~ /Tutorial/);
+      $staff{'load'}{$staff} += $creds  unless ($creds eq 'X');
+    }
+    close CUSTAFF;
+
+    my $newcustaff="$repsdir/CSV/cu-staff.csv";
+    open NEWCUSTAFF, ">$newcustaff" or die "$!: $newcustaff\n";
+    print NEWCUSTAFF (sort by_year @newallocs);
+    close NEWCUSTAFF;
+    my $oldcustaff="$repsdir/CSV/old-cu-staff.csv";
+    open OLDCUSTAFF, ">$oldcustaff" or die "$!: $oldcustaff\n";
+    print OLDCUSTAFF (sort by_year @oldallocs);
+    close OLDCUSTAFF;
+
+  }
+
+
+sub get_cu_titles
+  {
+
+    my $datadir=shift;
+    my $cutitle="$datadir/cu-title.csv";
+    open CUTITLE, $cutitle or die "$!: $cutitle\n";
+    my @newtitles;
+    my @oldtitles;
+
+    while (<CUTITLE>) {
+      chomp;
+      next unless (/\S/);
+      next if (/^#/);
+      s/ *$//;
+      my @cols = parse_csv($_);
+      my $cu = $cols[0];
+      $cu=$cu{'newcode'}{$cu} if ($cu{'newcode'}{$cu});
+      my $oldcu = $cols[0];
+      $oldcu=$cu{'oldcode'}{$cu} if ($cu{'oldcode'}{$cu});
+      my $title = $cols[1];
+      my $sem = $cols[2];
+      my $creds = $cols[3];
+      push @newtitles, "$cu,$title,$sem,$creds\n";
+      push @oldtitles, "$oldcu,$title,$sem,$creds\n";
+      next unless ((not $opts{'u'}) or ($cu =~ /^....[1-3]/));
+      $cu{'staff'}{$cu} = "ANO";
+      $cu{'title'}{$cu} = $title;
+      $cu{'sem'}{$cu} = $sem;
+      $cu{'creds'}{$cu} = $creds;
+    }
+    close CUTITLE;
+
+    my $newcutitles="$repsdir/CSV/cu-titles.csv";
+    open NEWCUTITLES, ">$newcutitles" or die "$!: $newcutitles\n";
+    print NEWCUTITLES (sort by_year @newtitles);
+    close NEWCUTITLES;
+    my $oldcutitles="$repsdir/CSV/old-cu-titles.csv";
+    open OLDCUTITLES, ">$oldcutitles" or die "$!: $oldcutitles\n";
+    print OLDCUTITLES (sort by_year @oldtitles);
+    close OLDCUTITLES;
+  }
+
+sub print_cu_alloc
+  {
+    open CUSTTEX, ">$custtex" or die "$!: $custtex\n";
+    open CUSTTXT, ">$custtxt" or die "$!: $custtxt\n";
+    open CUISSTXT, ">$cuisstxt" or die "$!: $cuisstxt\n";
+    
+    print CUSTTEX << 'EOF';
+\documentclass[10pt]{article}
+\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,color,colortbl}
+\definecolor{amber}{rgb}{0.85,0.66,0}
+\pagestyle{fancy}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[L]{by course unit}
+\fancyfoot[C]{\thepage}
+\fancyfoot[R]{\today \ at \currenttime}
+\thispagestyle{plain}
+\begin{document}
+\begin{center}
+\bfseries \large Proposed Teaching allocation 
+EOF
+
+    print CUSTTEX $session;
+    
+    print CUSTTEX << 'EOF';
+ --  by course unit \\
+\today \ at \currenttime
+\end{center}
+\begin{longtable}{lrlP{2.8in}P{2.0in}}
+  \hline
+EOF
+
+    foreach my $cu (sort by_year keys %{$cu{'staff'}})
+      {
+	my $mark=$cu{'issue'}{$cu};
+	$mark .="?" if ($cu{'staff'}{$cu} =~ /ANO/);
+	$mark .="!" if ($cu{'creds'}{$cu} != $cu{'credsalloc'}{$cu});
+	my $num = $cu{'numbers'}{$cu};
+	$cu{'staff'}{$cu} =~ s/, $//;
+	$cu{'staff'}{$cu} =~ s/, $//;
+	my $issuetext = "";
+	$issuetext = $cu{'issuetext'}{$cu} if ($cu{'issuetext'}{$cu});
+	$issuetext = $issuetext . ' - No unit leader allocated' unless ($cu{'leader'}{$cu});
+	if ($cu{'needsfixing'}{$cu} == 1) {
+	  print CUSTTEX "$mark& $num & \\textcolor{red}{\\textbf{$cu}}&",
+	    " \\textcolor{red}{$cu{'title'}{$cu}} & \\textcolor{red}{$cu{'staff'}{$cu}} \\\\\n";
+	}
+	elsif ($cu{'needsfixing'}{$cu} == 2) {
+	  print CUSTTEX "$mark& $num & \\textcolor{blue}{\\textbf{$cu}}&",
+	    " \\textcolor{blue}{$cu{'title'}{$cu}} & \\textcolor{blue}{$cu{'staff'}{$cu}} \\\\\n";
+	}
+	else {
+	  print CUSTTEX "$mark& $num & \\textbf{$cu}&",
+	  " $cu{'title'}{$cu} & $cu{'staff'}{$cu} \\\\\n";
+	}
+	if ($issuetext =~ m{\S}) {
+	  if ($cu{'needsfixing'}{$cu} == 1) {
+	    # what to do here?
+	    print CUSTTEX '\\ & &\multicolumn{3}{>{\columncolor[gray]{.95}}P{5.2in}}{',"\\emph{$issuetext}}\\\\\n";
+	  }
+	  else {
+	    print CUSTTEX '\\ & &\multicolumn{3}{P{5.2in}}{',"\\emph{$issuetext}}\\\\\n";
+	  }
+	}
+	print CUSTTEX " \\hline \n";
+	print CUSTTXT "$cu \t",
+	  " $cu{'title'}{$cu} \t $cu{'staff'}{$cu}\n";
+	if ($cu{'issue'}{$cu}) {
+	  print CUISSTXT "$cu \t",
+	    " $cu{'title'}{$cu} \t $cu{'staff'}{$cu}\t  $issuetext\n";
+	}
+      }
+    
+    print CUSTTEX << 'EOF';
+\end{longtable}
+\input{../teaching-data/notes}
+\end{document}
+EOF
+
+    close CUSTTEX;
+    close CUSTTXT;
+    close CUISSTXT;
+  }
+
+sub print_staff_by_load
+  {
+    open STAFFCUTEX, ">$staffcutex" or die "$!: $staffcutex\n";
+
+    print STAFFCUTEX << 'EOF';
+\documentclass[10pt]{article}
+\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,color,colortbl}
+\definecolor{amber}{rgb}{0.85,0.66,0}\pagestyle{fancy}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[L]{by staff load}
+\fancyfoot[C]{\thepage \ at \currenttime}
+\fancyfoot[R]{\today}
+\thispagestyle{plain}
+\begin{document}
+\begin{center}
+\bfseries \large Proposed Teaching allocation 
+EOF
+
+    print STAFFCUTEX $session;
+
+    print STAFFCUTEX << 'EOF';
+ -- by staff load\\
+\today \ at \currenttime
+\end{center}
+\begin{longtable}{llP{3in}P{1.2in}}
+  \hline
+EOF
+
+    foreach my $staff (sort by_tot keys %{$staff{'load-text'}}) {
+      $staff{'load-text'}{$staff} =~ s/, $//;
+      print STAFFCUTEX "$staff{'name'}{$staff} ($staff)& ",
+	"$staff{'load'}{$staff}&$staff{'load-text'}{$staff}",
+	  "&$staff{'comment'}{$staff}\\\\ \\hline \n";
+    }
+
+    print STAFFCUTEX << 'EOF';
+\end{longtable}
+\end{document}
+EOF
+
+    close STAFFCUTEX;
+  }
+
+sub print_staff_by_name
+  {
+
+    open STAFFCUTEXALPH, ">$staffcutexalph" or die "$!: $staffcutexalph\n";
+    open STAFFCUTEXALPHCSV, ">$staffcutexalphcsv" or die "$!: $staffcutexalphcsv\n";
+    open STAFFTUTSTXT, ">$stafftutstxt" or die "$!: $stafftutstxt\n";
+    open ALLSTAFFTUTS, ">$allstafftuts" or die "$!: $allstafftuts\n";
+
+    print STAFFCUTEXALPH << 'EOF';
+\documentclass[10pt]{article}
+\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,color,colortbl}
+\definecolor{amber}{rgb}{0.85,0.66,0}\pagestyle{fancy}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[L]{by staff name}
+\fancyfoot[C]{\thepage}
+\fancyfoot[R]{\today \ at \currenttime}
+\thispagestyle{plain}
+\begin{document}
+\begin{center}
+\bfseries \large Proposed Teaching allocation 
+EOF
+
+    print STAFFCUTEXALPH $session;
+
+    print STAFFCUTEXALPH << 'EOF';
+ -- by staff (alpha)\\
+\today \ at \currenttime
+\end{center}
+\begin{longtable}{llP{3in}P{1.2in}}
+  \hline
+EOF
+    foreach my $staff (sort by_surname keys %{$staff{'load-text'}}) {
+      print ALLSTAFFTUTS "1st Yr Tutorial,$staff\n";
+      print ALLSTAFFTUTS "2nd Yr Tutorial,$staff\n";
+      $staff{'load-text'}{$staff} =~ s/, $//;
+      print STAFFCUTEXALPH "$staff{'name'}{$staff} ($staff)& ",
+	"$staff{'load'}{$staff}&$staff{'load-text'}{$staff}",
+	  "&$staff{'comment'}{$staff}\\\\ \\hline \n";
+      print STAFFCUTEXALPHCSV "$staff,$staff{'load'}{$staff},$staff{'load-text'}{$staff}\n";
+      if ($staff{'tuts-text'}{$staff}) {
+	foreach my $tutdut (@{$staff{'tuts-text'}{$staff}}) {
+	  print STAFFTUTSTXT "$staff,$staff{'load'}{$staff},$tutdut\n";
+	}
+      }
+      else {
+	  print STAFFTUTSTXT "$staff,$staff{'load'}{$staff}\n";
+      }
+    }
+
+    print STAFFCUTEXALPH << 'EOF';
+\end{longtable}
+\end{document}
+EOF
+
+close STAFFCUTEXALPH;
+close STAFFCUTEXALPHCSV;
+}
+
+sub print_staff_list
+  {
+
+    open STAFFLIST, ">$stafflist" or die "$!: $stafflist\n";
+
+    print STAFFLIST << 'EOF';
+\documentclass[10pt]{article}
+\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,color,colortbl}
+\definecolor{amber}{rgb}{0.85,0.66,0}\pagestyle{fancy}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[L]{staff list}
+\fancyfoot[C]{\thepage}
+\fancyfoot[R]{\today \ at \currenttime}
+\thispagestyle{plain}
+\usepackage{a4-mancs,longtable,pbs,pslatex,datetime,color,colortbl}
+\begin{document}
+\begin{center}
+\bfseries \large CS Teaching Staff
+EOF
+    print STAFFLIST << 'EOF';
+\\
+\today \ at \currenttime
+\end{center}
+\begin{longtable}{lllp{3in}}
+  \hline
+EOF
+
+    foreach my $staff (sort by_surname keys %{$staff{'name'}}) {
+      $staff{'load-text'}{$staff} =~ s/, $//;
+      my $comm;
+      $comm = $staff{'comment'}{$staff} 
+	unless ($staff{'comment'}{$staff} eq $staff{'status'}{$staff});
+      print STAFFLIST "$staff{'name'}{$staff} & $staff& ",
+	"$staff{'status'}{$staff}& $comm \\\\ \\hline \n";
+    }
+
+    print STAFFLIST << 'EOF';
+\end{longtable}
+\end{document}
+EOF
+
+close STAFFLIST;
+}
+
+sub staff_entry 
+    {
+      my $cu = shift;
+      my $staff = shift;
+      my $load = shift;
+      
+    }
+
+sub print_code_map 
+      {
+	open CODEMAP, ">$codemap" or die "$!: $codemap\n";
+	open CODEMAPHTML, ">$codemaphtml" or die "$!: $codemaphtml\n";
+
+	print CODEMAP << 'EOF';
+\documentclass[10pt]{article}
+\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,color,colortbl}
+\definecolor{amber}{rgb}{0.85,0.66,0}
+\pagestyle{fancy}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[L]{code map}
+\fancyfoot[C]{\thepage}
+\fancyfoot[R]{\today \ at \currenttime}
+\thispagestyle{plain}
+\begin{document}
+\begin{center}
+\bfseries \large Course unit code conversion map 
+\\
+\today \ at \currenttime
+\end{center}
+\begin{longtable}{llP{3in}}
+  \hline
+EOF
+	print CODEMAPHTML << 'EOF';
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+<html> <head>
+<title>CS UG course unit codes </title>
+</head>
+
+<body>
+<h1> Comp Sci UG course unit codes </h1>
+<p>
+In September 2010 the codes for School of Computer Science UG course units were changed to
+use a new structure. There were two reasons for this.
+</p>
+<ul>
+<li>	We wish all course codes (except for the 3rd year project variants) to be unique
+        in their first three digits, to	remove the ambiguity and/or clumsiness in
+        everyday conversation, prevalent with the old structure; so every unit has a unique, 3 digit, short code which can be used in everday conversation. 
+</li>
+<li>
+	The new codes reflect the Themes structure, which supersedes the old
+	Streams structure.
+</li>
+</ul>
+<p>
+And, as a bonus
+</p>
+<ul>
+<li>	The previously redundant digit now shows the number of credits for the
+	course.
+</li>
+</ul>
+<p>
+As before, each course unit name consists of the characters COMP, followed by five
+digits. The new aspect of the structure is in the interpretation of the
+digits, as follows.</p>
+<ol>
+<li>		The academic year the course is aimed at, i.e. 1,2 or 3. </li>
+
+<li> 	 The `Theme Group', etc. -- see below. </li>
+
+<li> 	 A sequence number, starting from 1.
+		Gaps have been left in this to provide flexibility within
+		individual themes.  </li>
+<li>
+		The number of credits divided by 10. </li>
+</li>
+<li>		The period of teaching:
+<ul>
+<li>			0 -- the course runs through both semesters. </li>
+<li>			1 -- the course runs in Semester 1. </li>
+<li>			2 -- the course runs in Semester 2. </li>
+</ul>
+</li>
+</ol>
+<p>The theme groups, etc.: the second digit of each course name is one of the
+following.
+</p>
+<ol>	
+<li value ="0"> 	No theme, e.g. projects.</li>
+<li value = "9" >		Courses for students from other schools. </li>
+</ol>
+<p>
+The digit values 1 to 8 are for groups of related themes, and associated
+topics for courses not formally in a theme (e.g. first year units).
+</p>
+<ol>
+<li> 	Topic: Maths <br/>
+		Theme: Rigorous Development
+</li>
+<li>
+		Topic: Hardware <br/>
+		Theme: System-on-Chip
+</li>
+<li>
+
+		Theme: Agile Methods <br/>
+		Theme: Enterprise Information Systems <br/>
+		Theme: Software Engineering
+</li>
+<li>
+
+		Topic: Artificial Intelligence  <br/>
+		Theme: Learning and Search in Artificial Intelligence  <br/>
+		Theme: Natural Language, Representation and Reasoning  <br/>
+</li>
+<li>
+
+		Topic: Computer Architecture  <br/>
+		Theme: Computer Architecture
+</li>
+<li>
+
+		Topic: Programming. <br/>
+		Theme: Computer Languages  <br/>
+		Theme: Programming and Algorithms
+</li>
+<li>
+
+		Theme: Visual Computing
+</li>
+<li>
+
+		Topic: Distributed Computing  <br/>
+		Theme: Mobile Computing and Networks <br/>
+		Theme: Web and Distributed Systems
+</li>
+</ol>
+<p>
+<h2> Unit Codes </h2>
+Applying these rules results in the following list of codes. This table is ordered using the new codes (a table in old code order can be found <a href="#oldorder">below</a>).
+</p>
+
+<table border="1" cellpadding="5">
+<tr> <th> New code</th><th> Old code </th><th>Unit title </th> <th> Short code </th></tr>
+EOF
+	my $lastcu = "COMP1xxx0";
+	my $first =1;
+	foreach my $cu (sort  keys %{$cu{'oldcode'}})
+	  #    foreach my $cu (sort by_year_and_sem keys %{$cu{'oldcode'}})
+	  {
+	    my $oldcu = $cu{'oldcode'}{$cu};
+	    my ($ja,$shortcode) = ($cu =~ /^(....)(...)/);
+	    if (changeyear($lastcu,$cu)) {
+	      print CODEMAP "\\mbox{} & \\mbox{}& \\mbox{} \\\\ \\hline\n";
+	      print CODEMAPHTML "<tr> <td>&nbsp; </td><td>&nbsp; </td><td>&nbsp; </td><td>&nbsp; </td></tr>\n";
+	      #	  print CODEMAPHTML "</table> <table border = \"1\">\n";
+	    } elsif ( 0 )	#changesem($lastcu,$cu))
+	      {
+		print CODEMAP "\\hline\n";
+		print CODEMAPHTML "<tr> <td>&nbsp; </td><td>&nbsp; </td><td>&nbsp; </td><td>&nbsp; </td></tr>\n";
+	      }
+	    $lastcu=$cu;
+	    print CODEMAP "$cu & $oldcu & $cu{'title'}{$cu} \\\\ \\hline\n";
+	    print CODEMAPHTML "<tr> <td> $cu </td> <td> $oldcu </td> <td> $cu{'title'}{$cu} </td ><td> $shortcode </td></tr> \n";
+	  }
+    
+	print CODEMAP << 'EOF';
+\end{longtable}
+\end{document}
+EOF
+
+	print CODEMAPHTML << 'EOF';
+</table>
+<a name="oldorder"/><h2> Unit Codes (Old code order)</h2>
+<table border="1" cellpadding="5">
+<tr> <th> Old code</th><th> New code </th><th>Unit title </th> <th> Short code </th></tr>
+EOF
+	$lastcu = "COMP1xxx0";
+	foreach my $cu (sort  by_old_code keys %{$cu{'oldcode'}}) {
+	  my $oldcu = $cu{'oldcode'}{$cu};
+	  my ($ja,$shortcode) = ($cu =~ /^(....)(...)/);
+	  if (changeyear($lastcu,$cu)) {
+	    print CODEMAPHTML "<tr> <td>&nbsp; </td><td>&nbsp; </td><td>&nbsp; </td><td>&nbsp; </td></tr>\n";
+	    #	  print CODEMAPHTML "</table> <table border = \"1\">\n";
+	  } elsif ( 0 )		#changesem($lastcu,$cu))
+	    {
+	      print CODEMAP "\\hline\n";
+	      print CODEMAPHTML "<tr> <td>&nbsp; </td><td>&nbsp; </td><td>&nbsp; </td><td>&nbsp; </td></tr>\n";
+	    }
+	  $lastcu=$cu;
+	  print CODEMAP "$cu & $oldcu & $cu{'title'}{$cu} \\\\ \\hline\n";
+	  print CODEMAPHTML "<tr> <td> $oldcu </td> <td> $cu </td> <td> $cu{'title'}{$cu} </td ><td> $shortcode </td></tr> \n";
+	}
+
+	print CODEMAPHTML << 'EOF';
+</table>
+EOF
+
+
+	print CODEMAPHTML << 'EOF';
+<hr>
+<font size="-1"> Last modified: 
+EOF
+	print CODEMAPHTML " $today ";
+	print CODEMAPHTML << 'EOF';
+</font>
+<address>
+<font size="-1">Queries regarding this page should be
+addressed to <a href=
+"mailto:graham@cs.man.ac.uk?Subject=Course%20Codes">Graham
+Gough.</a></font>
+</address>
+<hr>
+
+</body>
+</html>
+EOF
+
+	close CODEMAP;
+	close CODEMAPHTML;
+      }
+
+sub changeyear
+  {
+    my $last = shift;
+    my $this = shift;
+    my ($ja,$leva,$resta) = ($last =~ /(....)(.)(....)/);
+    my ($jb,$levb,$restb) = ($this =~ /(....)(.)(....)/);
+    return ($leva ne $levb);
+   
+}
+
+sub changesem
+  {
+    my $last = shift;
+    my $this = shift;
+    my ($ja,$sema) = ($last =~ /(........)(.)/);
+    my ($jb,$semb) = ($this =~ /(........)(.)/);
+    return ($sema ne $semb);
+   
+  }
+
+sub get_stu_nums
+    {
+      my $stunumdata='wget -q -O - http://www.cs.man.ac.uk/~graham/course_numbers.txt';
+      print STDERR "getting stu numbers\n";
+      open STUNUMDATA, "$stunumdata|" or die "$!: $stunumdata\n";
+      while (<STUNUMDATA>) {
+	chomp;
+	next unless (/^COMP/);
+	s/ *$//;
+	s/^ *//;
+	my @cols =split /\t/;
+	my $cu = $cols[0];
+	my $num = $cols[1];
+	$cu{'numbers'}{$cu} = $num;
+      }
+    }
+
+sub parse_csv {
+    return quotewords(",",0, $_[0]);
+}

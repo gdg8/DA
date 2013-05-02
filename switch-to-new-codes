@@ -1,0 +1,14 @@
+#!/bin/sh
+SESSION=12-13
+
+DATE=`date "+%Y-%m-%d"`
+mkdir $SESSION/teaching-data/Old/$DATE
+
+for file in cu-staff cu-issues cu-title
+do
+    mv $SESSION/teaching-data/$file.csv $SESSION/teaching-data/Old/$DATE
+    cp $SESSION/reps/CSV/$file.csv $SESSION/teaching-data/$file.csv
+done
+
+mv $SESSION/teaching-data/cu-alias.csv $SESSION/teaching-data/Old/$DATE
+touch $SESSION/teaching-data/cu-alias.csv
