@@ -20,6 +20,7 @@ my $repsdir="$session/reps";
 my %cu;
 my %issue;
 my %staff;
+my %tutcount;
 
 my $staffcutex="$repsdir/staff-by-tot.tex";
 my $custtex="$repsdir/cu-staff.tex";
@@ -307,19 +308,40 @@ sub get_staff_alloc
       if ($cu{'leader'}{$cu} eq $staff) {
 	$staff_entry = "\\textbf{$staff}";
       }
+      my $staff_creds_info;
+
+      if ($cu =~ m{SAB|Tutorial})
+	{
+	  $staff_creds_info = $staff_entry;
+	}
+      else {
+	  $staff_creds_info = "$staff_entry ($creds)";
+	}
+
       if ($cu{'staff'}{$cu} eq 'ANO')
 	{
-	  $cu{'staff'}{$cu} = "$staff_entry ($creds), ";
+	  $cu{'staff'}{$cu} = "$staff_creds_info, ";
 	}
       else
 	{
-	  $cu{'staff'}{$cu} .= "$staff_entry ($creds), ";
+	  $cu{'staff'}{$cu} .= "$staff_creds_info, ";
 	}
+
       $cu{'credsalloc'}{$cu} += $creds  unless ($creds eq 'X');
 
+      if ($cu =~ /Tutorial/) {
+	push(@{$staff{'tuts-text'}{$staff}}, $cu);
+	$tutcount{"$cu"}++;
+
+      }
       $cu =~ s/(.)(...)/$1/;
-      $staff{'load-text'}{$staff} .= "$cu ($creds), ";
-      push(@{$staff{'tuts-text'}{$staff}}, $cu) if ($cu =~ /Tutorial/);
+      if ($cu =~ m{SAB}) {
+	$staff{'load-text'}{$staff} .= "$cu, ";
+      }
+      else
+	{
+	  $staff{'load-text'}{$staff} .= "$cu ($creds), ";
+	}
       $staff{'load'}{$staff} += $creds  unless ($creds eq 'X');
     }
     close CUSTAFF;
@@ -386,7 +408,7 @@ sub print_cu_alloc
     
     print CUSTTEX << 'EOF';
 \documentclass[10pt]{article}
-\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,color,colortbl}
+\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,xcolor,colortbl}
 \definecolor{amber}{rgb}{0.85,0.66,0}
 \pagestyle{fancy}
 \renewcommand{\headrulewidth}{0pt}
@@ -415,11 +437,15 @@ EOF
 	$mark .="?" if ($cu{'staff'}{$cu} =~ /ANO/);
 	$mark .="!" if ($cu{'creds'}{$cu} != $cu{'credsalloc'}{$cu});
 	my $num = $cu{'numbers'}{$cu};
+	my $count;
+	if ($cu =~ m{Tutorial}) {
+	  $count = "( $tutcount{$cu} )";
+	}
 	$cu{'staff'}{$cu} =~ s/, $//;
 	$cu{'staff'}{$cu} =~ s/, $//;
 	my $issuetext = "";
 	$issuetext = $cu{'issuetext'}{$cu} if ($cu{'issuetext'}{$cu});
-	$issuetext = $issuetext . ' - No unit leader allocated' unless ($cu{'leader'}{$cu});
+	$issuetext = $issuetext . ' - No unit leader allocated' unless ($cu{'leader'}{$cu} or $cu =~ m{SAB|Tutorial|COMP300});
 	if ($cu{'needsfixing'}{$cu} == 1) {
 	  print CUSTTEX "$mark& $num & \\textcolor{red}{\\textbf{$cu}}&",
 	    " \\textcolor{red}{$cu{'title'}{$cu}} & \\textcolor{red}{$cu{'staff'}{$cu}} \\\\\n";
@@ -429,13 +455,13 @@ EOF
 	    " \\textcolor{blue}{$cu{'title'}{$cu}} & \\textcolor{blue}{$cu{'staff'}{$cu}} \\\\\n";
 	}
 	else {
-	  print CUSTTEX "$mark& $num & \\textbf{$cu}&",
+	  print CUSTTEX "$mark& $num & \\textbf{$cu} $count &",
 	  " $cu{'title'}{$cu} & $cu{'staff'}{$cu} \\\\\n";
 	}
 	if ($issuetext =~ m{\S}) {
 	  if ($cu{'needsfixing'}{$cu} == 1) {
 	    # what to do here?
-	    print CUSTTEX '\\ & &\multicolumn{3}{>{\columncolor[gray]{.95}}P{5.2in}}{',"\\emph{$issuetext}}\\\\\n";
+	    print CUSTTEX '\\ & &\multicolumn{3}{>{\columncolor{yellow!30}}P{5.2in}}{',"\\emph{$issuetext}}\\\\\n";
 	  }
 	  else {
 	    print CUSTTEX '\\ & &\multicolumn{3}{P{5.2in}}{',"\\emph{$issuetext}}\\\\\n";
@@ -467,7 +493,7 @@ sub print_staff_by_load
 
     print STAFFCUTEX << 'EOF';
 \documentclass[10pt]{article}
-\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,color,colortbl}
+\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,xcolor,colortbl}
 \definecolor{amber}{rgb}{0.85,0.66,0}\pagestyle{fancy}
 \renewcommand{\headrulewidth}{0pt}
 \fancyfoot[L]{by staff load}
@@ -491,7 +517,11 @@ EOF
 
     foreach my $staff (sort by_tot keys %{$staff{'load-text'}}) {
       $staff{'load-text'}{$staff} =~ s/, $//;
-      print STAFFCUTEX "$staff{'name'}{$staff} ($staff)& ",
+      my $staffname="\\textbf{$staff{'name'}{$staff}}";
+      $staffname="\\textbf{\\textcolor{red}{$staff{'name'}{$staff}}}" 
+	if ($staff{'load-text'}{$staff} =~ m{SAB});
+      
+      print STAFFCUTEX "$staffname ($staff)& ",
 	"$staff{'load'}{$staff}&$staff{'load-text'}{$staff}",
 	  "&$staff{'comment'}{$staff}\\\\ \\hline \n";
     }
@@ -514,7 +544,7 @@ sub print_staff_by_name
 
     print STAFFCUTEXALPH << 'EOF';
 \documentclass[10pt]{article}
-\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,color,colortbl}
+\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,xcolor,colortbl}
 \definecolor{amber}{rgb}{0.85,0.66,0}\pagestyle{fancy}
 \renewcommand{\headrulewidth}{0pt}
 \fancyfoot[L]{by staff name}
@@ -539,7 +569,11 @@ EOF
       print ALLSTAFFTUTS "1st Yr Tutorial,$staff\n";
       print ALLSTAFFTUTS "2nd Yr Tutorial,$staff\n";
       $staff{'load-text'}{$staff} =~ s/, $//;
-      print STAFFCUTEXALPH "$staff{'name'}{$staff} ($staff)& ",
+      my $staffname="\\textbf{$staff{'name'}{$staff}}";
+      $staffname="\\textbf{\\textcolor{red}{$staff{'name'}{$staff}}}" 
+	if ($staff{'load-text'}{$staff} =~ m{SAB});
+      
+      print STAFFCUTEXALPH "$staffname ($staff)& ",
 	"$staff{'load'}{$staff}&$staff{'load-text'}{$staff}",
 	  "&$staff{'comment'}{$staff}\\\\ \\hline \n";
       print STAFFCUTEXALPHCSV "$staff,$staff{'load'}{$staff},$staff{'load-text'}{$staff}\n";
@@ -569,14 +603,14 @@ sub print_staff_list
 
     print STAFFLIST << 'EOF';
 \documentclass[10pt]{article}
-\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,color,colortbl}
+\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,xcolor,colortbl}
 \definecolor{amber}{rgb}{0.85,0.66,0}\pagestyle{fancy}
 \renewcommand{\headrulewidth}{0pt}
 \fancyfoot[L]{staff list}
 \fancyfoot[C]{\thepage}
 \fancyfoot[R]{\today \ at \currenttime}
 \thispagestyle{plain}
-\usepackage{a4-mancs,longtable,pbs,pslatex,datetime,color,colortbl}
+\usepackage{a4-mancs,longtable,pbs,pslatex,datetime,xcolor,colortbl}
 \begin{document}
 \begin{center}
 \bfseries \large CS Teaching Staff
@@ -621,7 +655,7 @@ sub print_code_map
 
 	print CODEMAP << 'EOF';
 \documentclass[10pt]{article}
-\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,color,colortbl}
+\usepackage{a4-mancs,longtable,pbs,pslatex,fancyhdr,datetime,xcolor,colortbl}
 \definecolor{amber}{rgb}{0.85,0.66,0}
 \pagestyle{fancy}
 \renewcommand{\headrulewidth}{0pt}

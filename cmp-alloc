@@ -17,7 +17,7 @@ my $datahome="$gdghome/Teach/Duties/DutiesAlloc/Teach+Admin";
 $datahome=".";
 
 my $session="09-10";
-$session="12-13";
+$session="13-14";
 
 my $datadir="$datahome/$session/teaching-data";
 
