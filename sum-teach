@@ -445,6 +445,7 @@ EOF
 	$cu{'staff'}{$cu} =~ s/, $//;
 	my $issuetext = "";
 	$issuetext = $cu{'issuetext'}{$cu} if ($cu{'issuetext'}{$cu});
+	$issuetext =~ s{&}{\\&}g;
 	$issuetext = $issuetext . ' - No unit leader allocated' unless ($cu{'leader'}{$cu} or $cu =~ m{SAB|Tutorial|COMP300});
 	if ($cu{'needsfixing'}{$cu} == 1) {
 	  print CUSTTEX "$mark& $num & \\textcolor{red}{\\textbf{$cu}}&",
